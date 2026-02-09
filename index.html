@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>METEO_DATA_STREAM_V2</title>
+    <style>
+        body {
+            background: #000;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 15px;
+            overflow: hidden;
+            image-rendering: pixelated;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        h1 {
+            margin: 5px;
+            text-shadow: 0 0 8px #0f0;
+            font-size: 1.8em;
+        }
+        #terminal {
+            border: 1px solid #0a0;
+            padding: 15px;
+            background: rgba(0,20,0,0.7);
+            min-height: 60vh;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .line {
+            margin: 6px 0;
+        }
+        .prompt { color: #0f0; }
+        .error { color: #f00; }
+        .section { margin: 12px 0; padding-left: 15px; border-left: 3px solid #0f0; }
+        .forecast-day { margin: 8px 0; }
+        .news-item { margin: 8px 0; font-size: 0.9em; }
+        #status { color: #0c0; font-size: 1.1em; }
+        canvas { position: fixed; inset: 0; z-index: -1; opacity: 0.4; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <canvas id="matrix"></canvas>
+
+    <header>
+        <h1>METEO_DATA_STREAM_V2 - BUCUREȘTI</h1>
+        <div id="status">> ACCESS_LEVEL: ROOT | DECRYPTING METEO INTEL ...</div>
+    </header>
+
+    <div id="terminal">
+        <div class="line prompt">> SCANNING OPEN-SOURCE SOURCES FOR METEO & NEWS...</div>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        // Coordonate București
+        const lat = 44.4268;
+        const lon = 26.1025;
+
+        // Surse open-source: Open-Meteo (gratuit, no key), MET Norway (Yr.no API, gratuit), RSS Google News pentru știri
+        // Algoritm: Combină date - medie temp din surse, afișează consensus + știri recente
+
+        const output = document.getElementById('output');
+        const status = document.getElementById('status');
+
+        async function loadMeteo() {
+            output.innerHTML = '<div class="line prompt">> QUERYING OPEN SOURCES...</div>';
+            let currentTemp = [];
+            let forecasts = {};
+            let news = [];
+
+            // 1. Open-Meteo
+            try {
+                const omUrl = `https://api.open-meteo.com/v1/forecast?latitude=\( {lat}&longitude= \){lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset&timezone=Europe%2FBucharest`;
+                const omRes = await fetch(omUrl);
+                const omData = await omRes.json();
+                currentTemp.push(omData.current.temperature_2m);
+                output.innerHTML += '<div class="line">> OPEN-METEO: Current Temp ' + omData.current.temperature_2m + '°C</div>';
+
+                omData.daily.time.forEach((date, i) => {
+                    const day = new Date(date).toLocaleDateString('ro-RO', { weekday: 'long', month: 'short', day: 'numeric' });
+                    if (!forecasts[day]) forecasts[day] = { max: [], min: [] };
+                    forecasts[day].max.push(omData.daily.temperature_2m_max[i]);
+                    forecasts[day].min.push(omData.daily.temperature_2m_min[i]);
+                });
+            } catch (e) {
+                output.innerHTML += '<div class="line error">> ERROR OPEN-METEO: ' + e.message + '</div>';
+            }
+
+            // 2. MET Norway (Yr.no API) - XML, parsăm
+            try {
+                const metUrl = `https://api.met.no/weatherapi/locationforecast/2.0/classic?lat=\( {lat}&lon= \){lon}`;
+                const metRes = await fetch(metUrl);
+                const metText = await metRes.text();
+                const parser = new DOMParser();
+                const metXml = parser.parseFromString(metText, 'application/xml');
+
+                // Current (primul time)
+                const firstTime = metXml.querySelector('time');
+                const currentT = parseFloat(firstTime.querySelector('temperature')?.getAttribute('value'));
+                if (currentT) currentTemp.push(currentT);
+
+                // Forecast zilnic (grupăm pe zile)
+                const times = metXml.querySelectorAll('time');
+                times.forEach(time => {
+                    const from = new Date(time.getAttribute('from'));
+                    const day = from.toLocaleDateString('ro-RO', { weekday: 'long', month: 'short', day: 'numeric' });
+                    const temp = parseFloat(time.querySelector('temperature')?.getAttribute('value'));
+                    if (temp && day) {
+                        if (!forecasts[day]) forecasts[day] = { max: [], min: [] };
+                        forecasts[day].max.push(temp); // Simplu, luăm max/min din hourly
+                        forecasts[day].min.push(temp);
+                    }
+                });
+                output.innerHTML += '<div class="line">> MET-NORWAY: Current Temp ' + currentT + '°C</div>';
+            } catch (e) {
+                output.innerHTML += '<div class="line error">> ERROR MET-NORWAY: ' + e.message + '</div>';
+            }
+
+            // Calcul consensus current
+            if (currentTemp.length > 0) {
+                const avgTemp = currentTemp.reduce((a, b) => a + b, 0) / currentTemp.length;
+                output.innerHTML += '<div class="section"><span class="prompt">> CONSENSUS CURRENT: ' + avgTemp.toFixed(1) + '°C (București)</span></div>';
+            }
+
+            // Consensus forecast
+            const forecastDiv = '<div class="section"><span class="prompt">> FORECAST CONSENSUS (Următoarele zile):</span>';
+            output.innerHTML += forecastDiv;
+            Object.keys(forecasts).forEach(day => {
+                const maxAvg = forecasts[day].max.reduce((a, b) => a + b, 0) / forecasts[day].max.length;
+                const minAvg = forecasts[day].min.reduce((a, b) => a + b, 0) / forecasts[day].min.length;
+                output.innerHTML += `<div class="forecast-day">${day}: Max ${maxAvg.toFixed(1)}°C / Min ${minAvg.toFixed(1)}°C</div>`;
+            });
+            output.innerHTML += '</div>';
+
+            // 3. Știri meteo (RSS Google News - open, no key)
+            try {
+                const newsUrl = 'https://news.google.com/rss/search?q=vreme+Bucuresti&hl=ro&gl=RO&ceid=RO:ro';
+                const newsRes = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(newsUrl)}`); // Proxy gratuit pentru RSS to JSON
+                const newsData = await newsRes.json();
+                news = newsData.items.slice(0, 5); // Primele 5 știri
+
+                const newsDiv = '<div class="section"><span class="prompt">> UPDATE-URI ȘTIRI METEO RECENTE:</span>';
+                output.innerHTML += newsDiv;
+                news.forEach(item => {
+                    output.innerHTML += `<div class="news-item">\( {item.title} ( \){new Date(item.pubDate).toLocaleDateString('ro-RO')})</div>`;
+                });
+                output.innerHTML += '</div>';
+            } catch (e) {
+                output.innerHTML += '<div class="line error">> ERROR NEWS: ' + e.message + '</div>';
+            }
+
+            status.textContent = '> METEO STREAM ACTIVE | AUTO-UPDATE: 5min current / 30min forecast';
+        }
+
+        loadMeteo();
+        setInterval(loadMeteo, 300000); // 5 minute
+
+        // Matrix rain
+        const canvas = document.getElementById('matrix');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const chars = '010101ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$+-*/=%"\'#&@';
+        const font = 16;
+        const cols = Math.floor(canvas.width / font);
+        let drops = new Array(cols).fill(1);
+
+        function rain() {
+            ctx.fillStyle = 'rgba(0,0,0,0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#0f0';
+            ctx.font = font + 'px monospace';
+
+            drops.forEach((y, i) => {
+                const text = chars[Math.floor(Math.random() * chars.length)];
+                ctx.fillText(text, i * font, y * font);
+                if (y * font > canvas.height && Math.random() > 0.97) drops[i] = 0;
+                drops[i]++;
+            });
+        }
+
+        setInterval(rain, 60);
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            drops = new Array(Math.floor(canvas.width / font)).fill(1);
+        });
+    </script>
+</body>
+</html>
