@@ -1,5 +1,164 @@
 html lang="ro">
+<head><!DOCTYPE html>
+<html lang="ro">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>METEO_HACKGRID - BUCUREȘTI</title>
+    <style>
+        body {
+            background: #000;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 15px;
+            overflow-y: auto;
+            height: 100vh;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        h1 {
+            margin: 5px;
+            text-shadow: 0 0 8px #0f0;
+            font-size: 1.8em;
+        }
+        #terminal {
+            border: 1px solid #0a0;
+            padding: 15px;
+            background: rgba(0,20,0,0.7);
+            max-width: 1000px;
+            margin: 0 auto;
+            min-height: 70vh;
+            overflow-y: auto;
+        }
+        .line {
+            margin: 6px 0;
+            white-space: pre-wrap;
+        }
+        .prompt { color: #0f0; font-weight: bold; }
+        .error   { color: #f44; }
+        .data    { color: #0f8; font-size: 1.15em; margin: 8px 0; }
+        #status {
+            color: #0c0;
+            font-size: 1.1em;
+            text-align: center;
+            margin: 10px 0;
+        }
+        canvas {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            opacity: 0.35;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="matrix"></canvas>
+
+    <header>
+        <h1>METEO_HACKGRID - BUCUREȘTI</h1>
+        <div id="status">> ROOT ACCESS GRANTED | STREAM INITIALIZING...</div>
+    </header>
+
+    <div id="terminal">
+        <div class="line prompt">> CONNECTING TO SECURE PROXY ENDPOINT...</div>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        const output = document.getElementById('output');
+        const status = document.getElementById('status');
+
+        async function fetchWeather() {
+            output.innerHTML = '<div class="line prompt">> QUERYING PROXY /api/weather...</div>';
+
+            try {
+                const res = await fetch('/api/weather');
+                if (!res.ok) {
+                    throw new Error(`Proxy returned ${res.status}`);
+                }
+
+                const data = await res.json();
+
+                // Current weather
+                const current = data.current_condition[0];
+                output.innerHTML += `
+                    <div class="data">> TEMPERATURĂ ACUM: ${current.temp_C}°C (se simte ca ${current.FeelsLikeC}°C)</div>
+                    <div class="data">> ${current.weatherDesc[0].value} | Umiditate ${current.humidity}% | Vânt ${current.windspeedKmph} km/h</div>
+                `;
+
+                // Forecast next 3 days
+                output.innerHTML += '<div class="line prompt">> PROGNOZĂ URMĂTOARELE 3 ZILE:</div>';
+                data.weather.slice(0, 3).forEach(day => {
+                    const date = new Date(day.date).toLocaleDateString('ro-RO', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'short'
+                    });
+                    output.innerHTML += `
+                        <div class="data">
+                            ${date}: ${day.mintempC} → ${day.maxtempC}°C | ${day.hourly[4].weatherDesc[0].value}
+                        </div>
+                    `;
+                });
+
+                status.textContent = '> STREAM ACTIVE | AUTO-UPDATE: 15 min';
+
+            } catch (e) {
+                output.innerHTML += `
+                    <div class="line error">> EROARE: ${e.message}</div>
+                    <div class="line prompt">> Verifică https://bucuresti-meteo-hackgrid.vercel.app/api/weather direct în browser</div>
+                `;
+                status.textContent = '> ERROR DETECTED';
+                console.error('Fetch error:', e);
+            }
+        }
+
+        // Pornire imediată + update la 15 minute
+        fetchWeather();
+        setInterval(fetchWeather, 15 * 60 * 1000);
+
+        // Matrix rain
+        const canvas = document.getElementById('matrix');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const chars = '01ABCDEFGHIJKLMNOPQRSTUVWXYZ$+-*/=%"#&@';
+        const fontSize = 16;
+        const columns = canvas.width / fontSize;
+        const drops = Array(Math.floor(columns)).fill(1);
+
+        function rain() {
+            ctx.fillStyle = 'rgba(0,0,0,0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#0f0';
+            ctx.font = fontSize + 'px monospace';
+
+            drops.forEach((y, i) => {
+                const text = chars[Math.floor(Math.random() * chars.length)];
+                ctx.fillText(text, i * fontSize, y * fontSize);
+
+                if (y * fontSize > canvas.height && Math.random() > 0.975) {
+                    drops[i] = 0;
+                }
+                drops[i]++;
+            });
+        }
+
+        setInterval(rain, 50);
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>METEO_DATA_STREAM_V2</title>
